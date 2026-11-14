@@ -4,8 +4,11 @@ import type { EngineInterface, Register, ThemeSetArgs } from 'claude-code'
 import type { Corner, FeedItem, Layout, MapData, Place, TermLine, Weather, Widget } from '../types'
 
 import type { LayoutProps, LayoutWin } from './layout'
+import { colorOf, dashCells, type DashView } from './terminal'
 
 const MANAGE = 'bat-cave-manage'
+// The terminal's stand-in for the backdrop: the same scene drawn in a Raster.
+const DASH = 'bat-cave-dash'
 
 
 import { makeColors } from './make-colors.js'
@@ -628,6 +631,7 @@ const setLayout = async ($: EngineInterface, change: (now: Layout) => Layout) =>
   await $.store.set('layout', after)
   if (after.isOn !== before.isOn) {
     await (after.isOn ? $.theme.set(LOOK) : $.theme.clear())
+    await showDash($, after.isOn)
   }
   const place = after.map.place
   if (after.map.isOn && place !== null && (await read($, mapData))?.key !== mapKey(place)) {
@@ -640,6 +644,95 @@ const setLayout = async ($: EngineInterface, change: (now: Layout) => Layout) =>
     void loadWeather($).catch(() => undefined)
   }
   return after
+}
+
+// ---------------------------------------------------------------- terminal dashboard
+// Glyphs some terminals draw two cells wide, swapped for narrow ones.
+const NARROW_SKY: Record<string, string> = { '⛅': '☁', '⚡': 'ϟ' }
+const dashViewOf = async ($: EngineInterface, now: number): Promise<DashView> => {
+  const l = await read($, layout)
+  const list = await read($, lines)
+  const wx = await read($, weather)
+  const md = await read($, mapData)
+  const items = await read($, feed)
+  const place = l.map.place
+  const d = new Date(now)
+  const local = -d.getTimezoneOffset() * 60
+  const ready = place !== null && wx !== null && wx.key === mapKey(place) ? wx : null
+  const there = ready === null ? null : new Date(now + ready.offset * 1000)
+  const [glyph, words] = ready === null ? ['', ''] : skyOf(ready.code, ready.isDay)
+  const city = place === null ? 'NO TARGET' : cityOf(place)
+  return {
+    now,
+    bat: BAT,
+    wins: WIDGETS.map(id => ({ id, isOn: l[id].isOn, x: l[id].x, y: l[id].y, w: l[id].w * l[id].k, h: l[id].h * l[id].k })),
+    clock: {
+      hh: two(d.getHours()),
+      mm: two(d.getMinutes()),
+      ss: two(d.getSeconds()),
+      date: `${DAYS[d.getDay()]} ${two(d.getDate())} ${MONTHS[d.getMonth()]} · UTC${offsetOf(local)}`,
+      there: there === null || ready === null ? '' : `${city} ${two(there.getUTCHours())}:${two(there.getUTCMinutes())} ${offsetOf(ready.offset - local)}h`,
+      day: (d.getHours() * 60 + d.getMinutes()) / 1440,
+    },
+    weather: {
+      title: `◆ WEATHER // ${city}`,
+      isReady: ready !== null,
+      hint: place === null ? 'search a place in /bat-cave' : (await read($, weatherStatus)) || 'reading the sky…',
+      glyph: NARROW_SKY[glyph] ?? glyph,
+      temp: ready === null ? '' : `${Math.round(ready.temp)}°C`,
+      words,
+      hi: ready === null ? '' : `${Math.round(ready.hi)}°`,
+      lo: ready === null ? '' : `${Math.round(ready.lo)}°`,
+      feels: ready === null ? '' : `feels ${Math.round(ready.feels)}°`,
+      line2: ready === null ? '' : `wind ${Math.round(ready.wind)} km/h ${COMPASS[Math.round(ready.windDir / 45) % 8] ?? ''}`,
+      line3: ready === null ? '' : `humidity ${Math.round(ready.humidity)}%`,
+      line4: ready === null ? '' : `↑ ${ready.sunrise}  ↓ ${ready.sunset}`,
+      hours: ready === null ? [] : ready.hours.map(one => ({ h: one.h, t: one.t })),
+    },
+    map: {
+      title: `◆ GRID // ${place === null ? 'NO TARGET' : cut(place.label.split(',')[0] ?? '', 22).toUpperCase()}`,
+      right:
+        place === null ? '' : `${Math.abs(place.lat).toFixed(2)}${place.lat >= 0 ? 'N' : 'S'} ${Math.abs(place.lon).toFixed(2)}${place.lon >= 0 ? 'E' : 'W'}`,
+      isReady: place !== null && md !== null && md.key === mapKey(place),
+      hint: (await read($, mapStatus)) || 'search a place in /bat-cave',
+      major: md?.major ?? '',
+      minor: md?.minor ?? '',
+    },
+    feed: {
+      right: `${l.rss.feeds.length} source${l.rss.feeds.length === 1 ? '' : 's'}`,
+      hint: (await read($, feedStatus)) || 'add feeds in /bat-cave',
+      items: items.slice(0, 40).map(one => ({ source: one.source, title: one.title, age: one.at === 0 ? '' : ago(one.at, now) })),
+    },
+    term: {
+      isActive: await read($, isActive),
+      lines: list.slice(-60).map(one => ({
+        mark: MARK[one.state],
+        markColor: colorOf(MARK_COLOR[one.state]),
+        tool: one.tool,
+        arg: one.arg,
+        time: one.state === 'run' ? '' : took(one.ms),
+        isRunning: one.state === 'run',
+      })),
+    },
+  }
+}
+// The open dashboard's Raster size, set as it draws; null while none is shown.
+let dashSize: { cols: number; rows: number } | null = null
+const blitDash = async ($: EngineInterface) => {
+  const size = dashSize
+  if (size === null) {
+    return
+  }
+  const r = await $.ui.blit({ requestId: DASH, key: 'dash', cells: dashCells(await dashViewOf($, Date.now()), size.cols, size.rows) })
+  if (r.deny !== undefined) {
+    dashSize = null
+  }
+}
+const showDash = async ($: EngineInterface, isOn: boolean) => {
+  const surfaces = await $.session.surfaces().catch(() => [] as readonly string[])
+  if (surfaces.includes('terminal')) {
+    await (isOn ? $.ui.open({ id: DASH, title: 'bat-cave' }) : $.ui.close({ id: DASH }))
+  }
 }
 
 const where = (w: Widget) => `at ${w.x},${w.y} ${Math.round(w.w * w.k)}×${Math.round(w.h * w.k)}`
@@ -722,7 +815,10 @@ export const register: Register = on => {
     await update($, layout, () => saved)
     if (saved.isOn) {
       const set = await $.theme.set(LOOK)
-      if (!set.isDrawn) {
+      // A terminal draws no theme; it gets the dashboard pane instead.
+      if (e.surface === 'terminal') {
+        void $.ui.open({ id: DASH, title: 'bat-cave' }).catch(() => undefined)
+      } else if (!set.isDrawn) {
         $.ui.status(set.reason)
       }
     }
@@ -734,6 +830,12 @@ export const register: Register = on => {
     $.clock.every(15 * 60 * 1000, () => {
       void loadFeeds($).catch(() => undefined)
       void loadWeather($).catch(() => undefined)
+    })
+    // About 6 frames a second for the dashboard; nothing while it is closed.
+    $.clock.every(160, () => {
+      void blitDash($).catch(() => {
+        dashSize = null
+      })
     })
     $.clock.every(15 * 1000, () => {
       void (async () => {
@@ -792,6 +894,9 @@ export const register: Register = on => {
           <Text bold color="#e8e8e8">BAT-CAVE</Text>
           <Text color="#8a8f96" wrap="truncate-end">{l.isOn ? 'theme on · drag widgets in the miniature' : 'theme off · the backdrop is hidden'}</Text>
           <Box flexGrow={1} />
+          {e.surface === 'terminal' && (
+            <Button key="open-dash" label="Dashboard" variant="secondary" onPress={() => void $.ui.open({ id: DASH, title: 'bat-cave' })} />
+          )}
           <Text color="#8a8f96">Theme</Text>
           <Button key="theme" label={l.isOn ? '● On' : '○ Off'} variant={l.isOn ? 'primary' : 'secondary'} onPress={() => void setLayout($, x => ({ ...x, isOn: !x.isOn }))} />
         </Box>
@@ -874,6 +979,28 @@ export const register: Register = on => {
               </Box>
             )}
           </Box>
+        </Box>
+      </Box>
+    )
+  })
+
+  // The terminal dashboard: the whole scene in one Raster, repainted by blitDash.
+  on('ui.render', { component: 'Pane', requestId: DASH }, async ($, e) => {
+    if (e.surface !== 'terminal') {
+      const { Text } = $.ui.resolve(e)
+      return <Text color="#8a8f96">The bat-cave dashboard is for the terminal. Here the theme draws it as the background.</Text>
+    }
+    const { Box, Button, Raster } = $.ui.resolve(e)
+    const cols = Math.max(20, Math.min(512, e.props.bodyColumns))
+    const rows = Math.max(12, Math.min(256, e.props.scroll.bodyRows - 1))
+    dashSize = { cols, rows }
+    const cells = dashCells(await dashViewOf($, Date.now()), cols, rows)
+    return (
+      <Box flexDirection="column">
+        <Raster key="dash" columns={cols} rows={rows} cells={cells} />
+        <Box flexDirection="row" gap={1}>
+          <Button key="dash-manage" label="Manage" onPress={() => void $.ui.open({ id: MANAGE, title: 'Manage', focus: true })} />
+          <Button key="dash-hide" label="Hide" variant="secondary" onPress={() => void $.ui.close({ id: DASH })} />
         </Box>
       </Box>
     )

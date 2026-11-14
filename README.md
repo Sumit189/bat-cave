@@ -1,6 +1,6 @@
 # bat-cave
 
-A dark, terminal-style theme for the Claude Code desktop app. A block-character bat turns slowly behind your conversation, surrounded by live widgets: a clock, the weather, a street map, a news feed and a terminal that shows Claude's tool calls as they happen.
+A dark, terminal-style theme for Claude Code. In the desktop app a block-character bat turns slowly behind your conversation, surrounded by live widgets: a clock, the weather, a street map, a news feed and a terminal that shows Claude's tool calls as they happen. In a terminal you get the same scene as a live dashboard pane.
 
 ![The bat-cave backdrop: a clock, weather, street map, news feed and tool-call terminal around a spinning bat](docs/backdrop.png)
 
@@ -90,6 +90,20 @@ A pulsing bat badge sits in the lower right corner.
 
 The background itself cannot be clicked: the app sends every click to the conversation on top of it, so all the controls live in Manage.
 
+## In the terminal
+
+![The bat-cave dashboard in a terminal: a braille bat, a block-digit clock, weather with a sparkline, a braille street map, the news feed and live tool calls](docs/terminal-dashboard.png)
+
+A terminal can't draw a theme or a background, so there bat-cave opens a **dashboard pane** instead. It draws the same scene in character cells and animates it about six times a second:
+
+- the bat turning in braille dots
+- the clock in big block digits, with seconds ticking and a bar for the day
+- the weather with the next 12 hours as a sparkline
+- the street map in braille, with the radar sweeping over it
+- the feed, and Claude's tool calls as they run
+
+It opens by itself when a terminal session starts with the theme on, uses the layout you arrange in Manage, and closes when you switch the theme off. Its **Manage** button opens Manage, and **Hide** closes it; the **Dashboard** button in Manage brings it back. Characters a terminal draws two cells wide, such as emoji in feed titles, are shown as a dot so the grid stays aligned.
+
 ## Where data comes from
 
 The widgets reach these services, and nothing else:
@@ -133,7 +147,8 @@ claude plugin test .
 
 - `hooks/register.tsx`: the theme, the backdrop and its widgets, and the Manage pane
 - `hooks/layout.tsx`: the draggable miniature inside Manage
+- `hooks/terminal.ts`: the terminal dashboard, drawn into a grid of character cells
 - `types/index.d.ts`: the shape of what the theme keeps
 - `tests/`: tests that drive Manage and check what the backdrop draws
 
-The images in `docs/` of the backdrop and its widgets are drawn by the theme's own code with real map, weather and feed data, then rendered to PNG.
+The images in `docs/` of the backdrop, its widgets and the terminal dashboard are drawn by the theme's own code with real map, weather and feed data, then rendered to PNG.
