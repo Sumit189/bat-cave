@@ -1,0 +1,6 @@
+{
+  "name": "bat-cave",
+  "version": "0.12.0",
+  "description": "A black terminal look with a spinning block-character bat, background widgets (tool-call terminal, street map of any place, RSS feed) and a Manage pane to arrange them, search places and add feeds.",
+  "types": "./types/index.d.ts"
+}

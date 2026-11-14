@@ -1,0 +1,5 @@
+{
+  "name": "bat-cave",
+  "owner": { "name": "Sumit189" },
+  "plugins": [{ "name": "bat-cave", "source": "./" }]
+}
